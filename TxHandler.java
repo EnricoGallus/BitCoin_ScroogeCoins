@@ -1,5 +1,4 @@
 import java.util.ArrayList;
-import java.util.HashSet;
 
 public class TxHandler {
 
@@ -24,34 +23,27 @@ public class TxHandler {
      *     values; and false otherwise.
      */
     public boolean isValidTx(Transaction tx) {
-
-        HashSet<UTXO> currentUtxos = new HashSet<UTXO>();
+        ArrayList<UTXO> currentUtxos = new ArrayList<>();
         double inputSum = 0;
         double outputSum = 0;
 
-        for (int i = 0; i < tx.numInputs(); i++){
+        for (int i = 0; i < tx.numInputs(); i++) {
             Transaction.Input input = tx.getInput(i);
             UTXO toValidateUtxo = new UTXO(input.prevTxHash, input.outputIndex);
             // (3) no UTXO is claimed multiple times
-            if (currentUtxos.contains(toValidateUtxo))
-            {
+            if (currentUtxos.contains(toValidateUtxo)) {
                 return false;
             }
 
             currentUtxos.add(toValidateUtxo);
+
             // (1) all outputs claimed are in the current UTXO pool
             if (!UtxoPool.contains(toValidateUtxo))
             {
                 return false;
             }
 
-            Transaction.Output output = tx.getOutput(input.outputIndex);
-            if (output == null)
-            {
-                // isn't this possible? shouldn't we handle this case?
-                return false;
-            }
-
+            Transaction.Output output = UtxoPool.getTxOutput(toValidateUtxo);
             inputSum += output.value;
 
             // (2) signatures are valid
@@ -74,8 +66,11 @@ public class TxHandler {
         // shouldn't we use decimal as amount type???
 
         // (5) the sum of input values is greater than or equal to the sum of its output
-        return inputSum < outputSum;
+        if (inputSum < outputSum) {
+            return false;
+        }
 
+        return true;
     }
 
     /**
@@ -84,26 +79,38 @@ public class TxHandler {
      * updating the current UTXO pool as appropriate.
      */
     public Transaction[] handleTxs(Transaction[] possibleTxs) {
-        ArrayList<Transaction> correctTxs = new ArrayList<Transaction>();
-        for (int i = 0; i < possibleTxs.length; i++)
-        {
-            Transaction current = possibleTxs[i];
-            if (isValidTx(current))
-            {
-                for (int j = 0; j < current.numInputs(); j++)
-                {
-                    Transaction.Input currentInput = current.getInput(j);
-                    UTXO existingUtxo = new UTXO(currentInput.prevTxHash, currentInput.outputIndex);
-                    UtxoPool.removeUTXO(existingUtxo);
-                    UTXO newUtxo = new UTXO(current.getHash(), j);
-                    UtxoPool.addUTXO(newUtxo, current.getOutput(j));
-                }
+        ArrayList<Transaction> correctTxs = new ArrayList<>();
 
-                correctTxs.add(current);
+        boolean shouldExit = false;
+        while (!shouldExit) {
+            shouldExit = true;
+            for (int i = 0; i < possibleTxs.length; i++)
+            {
+                Transaction current = possibleTxs[i];
+                if (current != null && isValidTx(current))
+                {
+                    for (int j = 0; j < current.numInputs(); j++)
+                    {
+                        Transaction.Input currentInput = current.getInput(j);
+                        UTXO existingUtxo = new UTXO(currentInput.prevTxHash, currentInput.outputIndex);
+                        UtxoPool.removeUTXO(existingUtxo);
+                        UTXO newUtxo = new UTXO(current.getHash(), j);
+                        UtxoPool.addUTXO(newUtxo, current.getOutput(j));
+                    }
+
+                    for (int k = current.numInputs(); k < current.numOutputs(); k++)
+                    {
+                        UTXO newUtxo = new UTXO(current.getHash(), k);
+                        UtxoPool.addUTXO(newUtxo, current.getOutput(k));
+                    }
+
+                    correctTxs.add(current);
+                    possibleTxs[i] = null;
+                    shouldExit = false;
+                }
             }
         }
 
         return correctTxs.toArray(new Transaction[correctTxs.size()]);
     }
-
 }
